@@ -5,7 +5,7 @@
   "main": "electron-main.cjs",
   "scripts": {
   "dev": "vite",
-  "build": "tsc && npm install --legacy-peer-deps && vite build",
+  "build": "vite build",
   "preview": "vite preview"
 },
   "dependencies": {

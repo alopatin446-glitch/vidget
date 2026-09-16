@@ -1,4 +1,3 @@
-
 import "./player-style.css";
 import { useEffect, useReducer, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -15,6 +14,7 @@ import * as Popover from "@radix-ui/react-popover";
 import { ReactComponent as PlayIcon } from "../../icons/play-icon.svg";
 import { ReactComponent as PauseIcon } from "../../icons/pause-icon.svg";
 import { trackEvent } from "../../utils/ga";
+import axios from "axios";
 
 export type PlayerProps = {
   player?: any;
@@ -30,7 +30,7 @@ function Player({ player }: PlayerProps) {
   const { isCashtabVisible, isInfoVisible } = playerState;
   const { isPlaying, volume, activeSong } = playerData as any;
 
-  // Находим текущий трек из нашего массива defaultSongs
+  // Находим текущий трек из нашего массива defaultSongs по ID
   const songMeta = defaultSongs.find((song) => song.id === activeSong) || defaultSongs[0];
   const title = songMeta?.title || "Unknown Track";
   const author = songMeta?.author || "Unknown Artist";
@@ -385,7 +385,6 @@ function Player({ player }: PlayerProps) {
     dispatch({ type: "SET_SHOW_INFO", payload: true });
   };
 
-  // Инициализация плейлиста из defaultSongs
   useEffect(() => {
     setSongsData((prev) => ({
       ...prev,
@@ -396,7 +395,7 @@ function Player({ player }: PlayerProps) {
     if (!playerData.activeSong) {
       setPlayerData((prev) => ({
         ...prev,
-        activeSong: defaultSongs[0].url,
+        activeSong: defaultSongs[0].id,
       }));
     }
 
@@ -412,8 +411,50 @@ function Player({ player }: PlayerProps) {
     }
   }, []);
 
+  useEffect(() => {
+    let timerId: any;
+    if (player) {
+      timerId = setInterval(() => {
+        dispatch({
+          type: "SET_VIDEO_META",
+          payload: {
+            duration: player.getDuration ? player.getDuration() : 0,
+            current: player.getCurrentTime ? player.getCurrentTime() : 0,
+          },
+        });
+      }, 1000);
+      (window as any).player = player;
+    }
+    return () => clearInterval(timerId);
+  }, [player]);
+
+  // Синхронизация клика по фону (анимации)
+  useEffect(() => {
+    const handler = () => {
+      if (!playerData.isPlaying && player?.playVideo) {
+        player.playVideo();
+      }
+    };
+
+    window.addEventListener("click", handler);
+
+    return () => {
+      window.removeEventListener("click", handler);
+    };
+  }, [player, playerData.isPlaying]);
+
   const onPlayPauseClick = () => {
-    setPlayerData((prev) => ({ ...prev, isPlaying: !prev.isPlaying }));
+    setPlayerData((prev) => {
+      // Запускаем/ставим на паузу фоновое видео (анимацию), если оно есть
+      if (player && typeof player.playVideo === "function") {
+        if (!prev.isPlaying) {
+          player.playVideo();
+        } else {
+          player.pauseVideo();
+        }
+      }
+      return { ...prev, isPlaying: !prev.isPlaying };
+    });
   };
 
   const onPlayListClick = () => {
@@ -432,30 +473,31 @@ function Player({ player }: PlayerProps) {
     });
   };
 
+  // ИСПРАВЛЕНО: Поиск следующего/предыдущего трека теперь идет по ID, а не по URL
   const handlePrevClick = () => {
-    const currIndex = defaultSongs.findIndex((s) => s.url === activeSong);
+    const currIndex = defaultSongs.findIndex((s) => s.id === activeSong);
     const newIndex = currIndex <= 0 ? defaultSongs.length - 1 : currIndex - 1;
-    const nextSongUrl = defaultSongs[newIndex].url;
+    const nextSongId = defaultSongs[newIndex].id;
 
     setPlayerData((prev) => ({
       ...prev,
-      activeSong: nextSongUrl,
+      activeSong: nextSongId,
       isPlaying: true,
     }));
-    window.localStorage.setItem("activeSong", nextSongUrl);
+    window.localStorage.setItem("activeSong", nextSongId);
   };
 
   const handleNextClick = () => {
-    const currIndex = defaultSongs.findIndex((s) => s.url === activeSong);
+    const currIndex = defaultSongs.findIndex((s) => s.id === activeSong);
     const newIndex = currIndex >= defaultSongs.length - 1 ? 0 : currIndex + 1;
-    const nextSongUrl = defaultSongs[newIndex].url;
+    const nextSongId = defaultSongs[newIndex].id;
 
     setPlayerData((prev) => ({
       ...prev,
-      activeSong: nextSongUrl,
+      activeSong: nextSongId,
       isPlaying: true,
     }));
-    window.localStorage.setItem("activeSong", nextSongUrl);
+    window.localStorage.setItem("activeSong", nextSongId);
   };
 
   const handleEcashClick = () => {
@@ -483,7 +525,6 @@ function Player({ player }: PlayerProps) {
 
   return (
     <div onClick={(e) => e.stopPropagation()}>
-      {/* Нативный скрытый аудио-плеер для MP3 с Selstorage */}
       <audio
         ref={audioRef}
         src={songMeta?.url}
